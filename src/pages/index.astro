@@ -1,31 +1,28 @@
 ---
-// ==========================================================
-// FRONTMATTER 
-// ==========================================================
+//frontmatter
 import Airtable from 'airtable';
 
 // 1. CONFIGURAZIONE DELLA CONNESSIONE
 const base = new Airtable({
-  apiKey: import.meta.env.AIRTABLE_API_KEY
-}).base(import.meta.env.AIRTABLE_BASE_ID);
+  apiKey: import.meta.env.PUBLIC_AIRTABLE_API_KEY
+}).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
 
 // 2. PREPARAZIONE DELLA VARIABILE PER I DATI
 let items = [];
-const titoloPagina = "Il mio archivio";
 
 // 3. RECUPERO DEI DATI DA AIRTABLE (con diagnostica)
 try {
   // Messaggio di debug per confermare l'inizio della chiamata
   console.log('--- Inizio recupero dati da Airtable ---');
 
-  const records = await base(import.meta.env.AIRTABLE_TABLE_NAME)
+  const records = await base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
     .select({ 
         maxRecords: 100,
         // CORREZIONE CRITICA: Specifica la vista SENZA filtri
         // Assicurati di aver creato in Airtable una vista chiamata esattamente 'Dati Per Astro'
-        view: 'Dati per Astro',
+        //view: 'Dati per Astro',
         // Nomi esatti dei campi da recuperare
-        fields: ['Nome Immagine', 'immagine', 'Categoria', 'Data']
+        //fields: ['Nome Immagine', 'immagine', 'Categoria', 'Data']
     })
     .all();
  
@@ -35,8 +32,8 @@ try {
   // 4. MAPPATURA DEI DATI (trasformazione per l'uso nel template)
   items = records.map(record => ({
     id: record.id,
-    title: record.fields['Nome Immagine'], 
-    image: record.fields.Immagine?.[0]?.url,
+    title: record.fields.NomeImmagine, 
+    image: record.fields.immagine?.[0]?.url,
     category: record.fields.Categoria
   }));
 
@@ -44,6 +41,8 @@ try {
   // Gestione degli errori: se qualcosa va storto, lo vedrai qui nel terminale
   console.error('!!! ERRORE CRITICO DURANTE IL CARICAMENTO DEI DATI:', error);
 }
+
+const titoloPagina = "Il mio archivio";
 ---
 
 <html lang="it">
@@ -65,7 +64,6 @@ try {
     </style>
 </head>
 <body>
-  <!-- valentina -->
     <main>
         <h1>{titoloPagina}</h1>
         <p>Elementi trovati: <span id="count">{items.length}</span></p>
