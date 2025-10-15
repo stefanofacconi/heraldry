@@ -1,5 +1,5 @@
 ---
-//frontmatter
+/*frontmatter
 import Airtable from 'airtable';
 
 // 1. CONFIGURAZIONE DELLA CONNESSIONE
@@ -8,9 +8,9 @@ const base = new Airtable({
 }).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
 
 // 2. PREPARAZIONE DELLA VARIABILE PER I DATI
-let items = [];
+let items = [];*/
 
-// 3. RECUPERO DEI DATI DA AIRTABLE (con diagnostica)
+/* 3. RECUPERO DEI DATI DA AIRTABLE VERSIONE 1(con diagnostica)
 try {
   // Messaggio di debug per confermare l'inizio della chiamata
   console.log('--- Inizio recupero dati da Airtable ---');
@@ -40,12 +40,94 @@ try {
 } catch (error) {
   // Gestione degli errori: se qualcosa va storto, lo vedrai qui nel terminale
   console.error('!!! ERRORE CRITICO DURANTE IL CARICAMENTO DEI DATI:', error);
-}
+}*/
 
+
+/*try {
+  // Messaggio di debug per confermare l'inizio della chiamata
+  console.log('--- Inizio recupero di TUTTI i dati da Airtable con paginazione ---');
+
+  // La libreria Airtable usa un sistema di "callback" per la paginazione.
+  // Lo "avvolgiamo" in una Promise per renderlo compatibile con lo stile async/await di Astro.
+  const allRecords = await new Promise((resolve, reject) => {
+    const recordsAccumulator = []; // Un array temporaneo per accumulare i record da tutte le pagine
+
+    base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
+      .select({
+        // NON usiamo più maxRecords. Chiediamo tutto.
+        // Come da tua richiesta, usiamo la vista predefinita commentando la riga 'view'.
+        // view: 'Dati per Astro',
+      })
+      .eachPage(
+        function page(records, fetchNextPage) {
+          // Questa funzione viene eseguita per ogni "pagina" di 100 record ricevuta.
+          // Aggiungiamo i record di questa pagina al nostro accumulatore.
+          records.forEach(record => recordsAccumulator.push(record));
+          
+          // Diciamo alla libreria di recuperare la pagina successiva.
+          fetchNextPage();
+        },
+        function done(err) {
+          // Questa funzione viene eseguita quando tutte le pagine sono state caricate (o se c'è un errore).
+          if (err) {
+            reject(err); // Se c'è un errore, la Promise fallisce.
+            return;
+          }
+          resolve(recordsAccumulator); // Se è tutto a posto, la Promise restituisce l'array completo.
+        }
+      );
+  });
+ 
+  // Messaggio di debug per mostrare il risultato della chiamata
+  console.log(`>>> Recupero completato. Record totali trovati: ${allRecords.length}`);
+
+  // 4. MAPPATURA DEI DATI (ora eseguita sull'array completo 'allRecords')
+  items = allRecords.map(record => ({
+    id: record.id,
+    title: record.fields.NomeImmagine, 
+    image: record.fields.immagine?.[0]?.url,
+    category: record.fields.Categoria
+  }));
+
+} catch (error) {
+  // Gestione degli errori
+  console.error('!!! ERRORE CRITICO DURANTE IL CARICAMENTO DEI DATI:', error);
+}*/
+
+
+//TERZO FRONTMATTER OTTIMIZZATO
+// src/pages/index.astro (FRONTMATTER SEMPLIFICATO)
+import Airtable from 'airtable';
+
+const base = new Airtable({
+  apiKey: import.meta.env.PUBLIC_AIRTABLE_API_KEY
+}).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
+
+let initialItems = []; // Solo gli elementi iniziali
 const titoloPagina = "Il mio archivio";
----
 
-<html lang="it">
+try {
+  const records = await base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
+    .select({
+      maxRecords: 100, // Carica solo la prima pagina
+      view: 'links 2',
+      fields: ['NomeImmagine', 'immagine', 'Categoria']
+    })
+    .all();
+  
+  initialItems = records.map(record => ({
+    id: record.id,
+    title: record.fields['NomeImmagine'],
+    image: record.fields.immagine?.[0]?.url,
+    category: record.fields.Categoria
+  }));
+
+} catch (error) {
+  console.error('ERRORE CRITICO DURANTE IL CARICAMENTO INIZIALE:', error);
+}
+---
+<!--PRIMO HTML-->
+<!-- <html lang="it">
 <head>
     <meta charset="utf--8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -118,5 +200,127 @@ const titoloPagina = "Il mio archivio";
         });
       });
     </script>
+</body>
+</html> -->
+
+
+<!--SECONDO HTML OTTIMIZZATO-->
+<html lang="it">
+<head>
+    <title>{titoloPagina}</title>
+    </head>
+<body>
+    <main>
+        <h1>{titoloPagina}</h1>
+        <p>Elementi mostrati: <span id="count">{initialItems.length}</span></p>
+        
+        <div class="grid" id="items-grid">
+            {initialItems.map(item => (
+                <article class="card" data-category={item.category}>
+                    {item.image && <img src={item.image} alt={item.title} />}
+                    <div class="card-content">
+                        <h3>{item.title}</h3>
+                        {item.category && <span class="category">{item.category}</span>}
+                    </div>
+                </article>
+            ))}
+        </div>
+
+        <div id="sentinel"></div>
+    </main>
+
+    <script>
+  const grid = document.getElementById('items-grid');
+  const sentinel = document.getElementById('sentinel');
+  const countElement = document.getElementById('count');
+
+  let currentPage = 1; // Abbiamo già caricato la pagina 1
+  let isLoading = false; // Flag per evitare richieste multiple mentre ne è già in corso una
+  let allDataLoaded = false; // Flag per sapere quando non ci sono più pagine da caricare
+
+  const loadNextBatch = async () => {
+    // Non fare nulla se sta già caricando o se abbiamo finito i dati
+    if (isLoading || allDataLoaded) return; 
+    
+    isLoading = true;
+    currentPage++;
+
+    console.log(`Richiesta dati per pagina ${currentPage}...`);
+    
+    try {
+      // Chiamata al nostro nuovo endpoint API creato in /src/pages/api/items.js
+      const response = await fetch(`/api/items?page=${currentPage}`);
+      if (!response.ok) {
+        throw new Error(`Errore HTTP: ${response.status}`);
+      }
+      const batch = await response.json();
+
+      // Se la pagina restituita è vuota, significa che abbiamo caricato tutto
+      if (batch.length === 0) {
+        console.log('Tutti i dati sono stati caricati.');
+        allDataLoaded = true;
+        sentinel.style.display = 'none'; // Nasconde la sentinella per non triggerare più
+        return;
+      }
+
+      //               LOGICA DI CREAZIONE CARD
+      
+      batch.forEach(item => {
+        // 1. Crea l'elemento contenitore principale della card
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.setAttribute('data-category', item.category);
+
+        // 2. Costruisce l'HTML interno della card come una stringa
+        let innerHTML = '';
+        if (item.image) {
+          innerHTML += `<img src="${item.image}" alt="${item.title}" loading="lazy" />`; // Aggiunto loading="lazy" per performance
+        }
+        
+        innerHTML += `<div class="card-content">`;
+        
+        if (item.title) {
+            innerHTML += `<h3>${item.title}</h3>`;
+        }
+
+        if (item.category) {
+          innerHTML += `<span class="category">${item.category}</span>`;
+        }
+        
+        innerHTML += `</div>`;
+        
+        // 3. Assegna l'HTML interno alla card
+        card.innerHTML = innerHTML;
+        
+        // 4. Aggiunge la card completa alla griglia
+        grid.appendChild(card);
+      });
+      
+      // Aggiorna il contatore degli elementi visualizzati
+      countElement.textContent = grid.children.length;
+
+    } catch (error) {
+      console.error('Errore nel caricare la pagina successiva:', error);
+      // Potremmo mostrare un messaggio di errore all'utente qui
+    } finally {
+      isLoading = false; // Resetta il flag per permettere la prossima richiesta
+    }
+  };
+
+  // L'Intersection Observer che monitora la sentinella
+  const observer = new IntersectionObserver((entries) => {
+    // Se la sentinella entra nell'area visibile...
+    if (entries[0].isIntersecting) {
+      // ...carica il blocco di dati successivo
+      loadNextBatch();
+    }
+  }, {
+    // Opzioni: triggera quando la sentinella è a 300px dal bordo inferiore dello schermo
+    rootMargin: '0px 0px 300px 0px'
+  });
+
+  // Inizia a osservare la sentinella
+  observer.observe(sentinel);
+</script>
 </body>
 </html>
