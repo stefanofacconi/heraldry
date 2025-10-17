@@ -1,155 +1,130 @@
 ---
-/*frontmatter
+// ## FRONTMATTER (LATO SERVER)
 import Airtable from 'airtable';
 
-// 1. CONFIGURAZIONE DELLA CONNESSIONE
-const base = new Airtable({
-  apiKey: import.meta.env.PUBLIC_AIRTABLE_API_KEY
-}).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
+const base = new Airtable({ apiKey: import.meta.env.PUBLIC_AIRTABLE_API_KEY }).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
 
-// 2. PREPARAZIONE DELLA VARIABILE PER I DATI
-let items = [];*/
-
-/* 3. RECUPERO DEI DATI DA AIRTABLE VERSIONE 1(con diagnostica)
-try {
-  // Messaggio di debug per confermare l'inizio della chiamata
-  console.log('--- Inizio recupero dati da Airtable ---');
-
-  const records = await base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
-    .select({ 
-        maxRecords: 100,
-        // CORREZIONE CRITICA: Specifica la vista SENZA filtri
-        // Assicurati di aver creato in Airtable una vista chiamata esattamente 'Dati Per Astro'
-        //view: 'Dati per Astro',
-        // Nomi esatti dei campi da recuperare
-        //fields: ['Nome Immagine', 'immagine', 'Categoria', 'Data']
-    })
-    .all();
- 
-  // Messaggio di debug per mostrare il risultato della chiamata
-  console.log(`>>> Record recuperati con successo: ${records.length}`);
-
-  // 4. MAPPATURA DEI DATI (trasformazione per l'uso nel template)
-  items = records.map(record => ({
-    id: record.id,
-    title: record.fields.NomeImmagine, 
-    image: record.fields.immagine?.[0]?.url,
-    category: record.fields.Categoria
-  }));
-
-} catch (error) {
-  // Gestione degli errori: se qualcosa va storto, lo vedrai qui nel terminale
-  console.error('!!! ERRORE CRITICO DURANTE IL CARICAMENTO DEI DATI:', error);
-}*/
-
-
-/*try {
-  // Messaggio di debug per confermare l'inizio della chiamata
-  console.log('--- Inizio recupero di TUTTI i dati da Airtable con paginazione ---');
-
-  // La libreria Airtable usa un sistema di "callback" per la paginazione.
-  // Lo "avvolgiamo" in una Promise per renderlo compatibile con lo stile async/await di Astro.
-  const allRecords = await new Promise((resolve, reject) => {
-    const recordsAccumulator = []; // Un array temporaneo per accumulare i record da tutte le pagine
-
-    base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
-      .select({
-        // NON usiamo più maxRecords. Chiediamo tutto.
-        // Come da tua richiesta, usiamo la vista predefinita commentando la riga 'view'.
-        // view: 'Dati per Astro',
-      })
-      .eachPage(
-        function page(records, fetchNextPage) {
-          // Questa funzione viene eseguita per ogni "pagina" di 100 record ricevuta.
-          // Aggiungiamo i record di questa pagina al nostro accumulatore.
-          records.forEach(record => recordsAccumulator.push(record));
-          
-          // Diciamo alla libreria di recuperare la pagina successiva.
-          fetchNextPage();
-        },
-        function done(err) {
-          // Questa funzione viene eseguita quando tutte le pagine sono state caricate (o se c'è un errore).
-          if (err) {
-            reject(err); // Se c'è un errore, la Promise fallisce.
-            return;
-          }
-          resolve(recordsAccumulator); // Se è tutto a posto, la Promise restituisce l'array completo.
-        }
-      );
-  });
- 
-  // Messaggio di debug per mostrare il risultato della chiamata
-  console.log(`>>> Recupero completato. Record totali trovati: ${allRecords.length}`);
-
-  // 4. MAPPATURA DEI DATI (ora eseguita sull'array completo 'allRecords')
-  items = allRecords.map(record => ({
-    id: record.id,
-    title: record.fields.NomeImmagine, 
-    image: record.fields.immagine?.[0]?.url,
-    category: record.fields.Categoria
-  }));
-
-} catch (error) {
-  // Gestione degli errori
-  console.error('!!! ERRORE CRITICO DURANTE IL CARICAMENTO DEI DATI:', error);
-}*/
-
-
-//TERZO FRONTMATTER OTTIMIZZATO
-// src/pages/index.astro (FRONTMATTER SEMPLIFICATO)
-import Airtable from 'airtable';
-
-const base = new Airtable({
-  apiKey: import.meta.env.PUBLIC_AIRTABLE_API_KEY
-}).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
-
-let initialItems = []; // Solo gli elementi iniziali
+let initialItems = [];
+let initialOffset = null;
 const titoloPagina = "Il mio archivio";
 
 try {
-  const records = await base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
-    .select({
-      maxRecords: 100, // Carica solo la prima pagina
-      view: 'links 2',
-      fields: ['NomeImmagine', 'immagine', 'Categoria']
-    })
-    .all();
-  
-  initialItems = records.map(record => ({
+  // NUOVO: Costruiamo manualmente l'URL per l'API di Airtable.
+  // Usiamo 'encodeURIComponent' per assicurarci che caratteri speciali
+  // nel nome della tabella o della vista non creino problemi.
+  const tableName = encodeURIComponent(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME);
+  const baseId = import.meta.env.PUBLIC_AIRTABLE_BASE_ID;
+  const viewName = encodeURIComponent('links 2');
+
+  // Questo è l'indirizzo esatto che interrogheremo.
+  // Stiamo chiedendo 100 record dalla vista specificata.
+  const url = `https://api.airtable.com/v0/${baseId}/${tableName}?pageSize=100&view=${viewName}`;
+
+  // NUOVO: Prepariamo gli "header" della richiesta.
+  // Questo è il modo standard per autenticarsi con un'API.
+  // Stiamo dicendo ad Airtable: "Sono io, ecco la mia chiave segreta".
+  const headers = {
+    'Authorization': `Bearer ${import.meta.env.PUBLIC_AIRTABLE_API_KEY}`,
+  };
+
+  // NUOVO: Eseguiamo la chiamata di rete usando 'fetch'.
+  // Questo è il comando base di JavaScript per fare richieste HTTP,
+  // senza nessuna libreria in mezzo.
+  const response = await fetch(url, { headers: headers });
+
+  // NUOVO: Controlliamo se la risposta è andata a buon fine.
+  // Se lo status non è "ok" (es. 401 non autorizzato, 404 non trovato),
+  // lanciamo un errore per capire cosa è andato storto.
+  if (!response.ok) {
+    throw new Error(`Errore dalla API di Airtable: ${response.status} ${response.statusText}`);
+  }
+
+  // NUOVO: Convertiamo la risposta, che è in formato testo (JSON),
+  // in un oggetto JavaScript che possiamo usare.
+  const data = await response.json();
+
+  // NUOVO: Il nostro log di diagnosi, adattato alla nuova struttura della risposta.
+  // La risposta diretta da Airtable contiene i record in `data.records`
+  // e l'offset direttamente in `data.offset`.
+  console.log("SERVER LOG (FETCH) | Offset ricevuto:", data.offset ? `Sì! (Inizia con ${data.offset.substring(0, 8)}...)` : "NO, ancora nullo!");
+
+  // Adattiamo la mappatura per leggere da 'data.records'.
+  initialItems = data.records.map(record => ({
     id: record.id,
     title: record.fields['NomeImmagine'],
     image: record.fields.immagine?.[0]?.url,
     category: record.fields.Categoria
   }));
+  
+  // Salviamo l'offset dalla nuova struttura dati.
+  initialOffset = data.offset;
 
 } catch (error) {
-  console.error('ERRORE CRITICO DURANTE IL CARICAMENTO INIZIALE:', error);
+  console.error('ERRORE CRITICO DURANTE IL CARICAMENTO INIZIALE (FETCH):', error.message);
 }
+
+/*try {
+  // Selezioniamo i dati da Airtable per il caricamento iniziale.
+  const firstPage = await base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
+    .select({
+      // MODIFICA CHIAVE: Abbiamo rimosso la riga "maxRecords: 100".
+      // Lasciamo solo pageSize per dire ad Airtable: "Dammi i record in blocchi
+      // da 100, a partire dal primo". In questo modo, Airtable sa che ci sono
+      // altre pagine e ci restituirà l'offset per raggiungerle.
+      pageSize: 100,
+      view: 'links 2',
+      fields: ['NomeImmagine', 'immagine', 'Categoria']
+    })
+    .firstPage();
+  
+  // NUOVO: Aggiungiamo un "console.log" diagnostico.
+  // Questo non è necessario per il funzionamento, ma è uno strumento per noi.
+  // Ci permette di verificare direttamente nel terminale se il server sta
+  // ricevendo correttamente l'offset da Airtable. È una buona pratica
+  // per capire cosa succede "dietro le quinte".
+  console.log("SERVER LOG | Offset ricevuto per la pagina successiva:", firstPage.offset ? `Sì, ricevuto (inizia con ${firstPage.offset.substring(0, 8)}...)` : "NO, non ricevuto!");
+
+  // Questa parte mappa i dati nel formato che usiamo nel sito, è invariata.
+  initialItems = firstPage.map(record => ({
+    id: record.id,
+    title: record.fields['NomeImmagine'],
+    image: record.fields.immagine?.[0]?.url,
+    category: record.fields.Categoria
+  }));
+  
+  // Questa riga salva l'offset per passarlo allo script del browser, è invariata.
+  initialOffset = firstPage.offset;
+
+} catch (error) {
+  // Blocco per la gestione degli errori, invariato.
+  console.error('ERRORE CRITICO DURANTE IL CARICAMENTO INIZIALE:', error.message);
+}*/
 ---
-<!--PRIMO HTML-->
-<!-- <html lang="it">
+
+<html lang="it">
 <head>
-    <meta charset="utf--8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width" />
-    <meta name="generator" content={Astro.generator} />
     <title>{titoloPagina}</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
     <style>
-        body { font-family: sans-serif; max-width: 1200px; margin: 2rem auto; }
-        .controls { margin-bottom: 2rem; }
-        .filters button { margin-right: 0.5rem; padding: 0.5rem 1rem; border: 1px solid #ccc; background: #f0f0f0; cursor: pointer; }
-        .filters button.active { background: #007bff; color: white; border-color: #007bff; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; }
-        .card { border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
-        .card img { width: 100%; height: 200px; object-fit: cover; }
+        body { font-family: sans-serif; max-width: 1400px; margin: 2rem auto; padding: 0 1rem; background-color: #f8f9fa; }
+        .controls { margin-bottom: 2rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+        .filters button { padding: 0.6rem 1.2rem; border: 1px solid #dee2e6; background-color: #ffffff; cursor: pointer; border-radius: 8px; }
+        .filters button:hover { background-color: #e9ecef; }
+        .filters button.active { background-color: #007bff; color: white; border-color: #007bff; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.5rem; }
+        .card { background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; }
+        .card img { width: 100%; height: 150px; object-fit: cover; display: block; background-color: #eee; }
         .card-content { padding: 1rem; }
+        .card-content h3 { margin: 0; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #sentinel { height: 50px; }
+      
     </style>
 </head>
 <body>
     <main>
         <h1>{titoloPagina}</h1>
-        <p>Elementi trovati: <span id="count">{items.length}</span></p>
-
+        <p>Elementi mostrati: <span id="count">{initialItems.length}</span></p>
         <div class="controls">
             <div class="filters">
                 <button class="filter-btn active" data-category="all">Tutti</button>
@@ -159,168 +134,137 @@ try {
                 <button class="filter-btn" data-category="Elementi per Stemmi">Elementi per Stemmi</button>
                 <button class="filter-btn" data-category="Altro">Altro</button>
             </div>
-            </div>
-       
-        <div class="grid">
-          {items.map(item => (
-            <article class="card" data-category={item.category}>
-              {item.image && <img src={item.image} alt={item.title} />}
-              <div class="card-content">
-                <h3>{item.title}</h3>
-                {item.category && <span class="category">{item.category}</span>}
-              </div>
-            </article>
-          ))}
         </div>
-    </main>
-
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const filterButtons = document.querySelectorAll('.filter-btn');
-        const cards = document.querySelectorAll('.card');
-        const countElement = document.getElementById('count');
-
-        filterButtons.forEach(button => {
-          button.addEventListener('click', function() {
-            const category = this.getAttribute('data-category');
-            filterButtons.forEach(btn => btn.classList.remove('active'));
-            this.classList.add('active');
-            
-            let visibleCount = 0;
-            cards.forEach(card => {
-              if (category === 'all' || card.getAttribute('data-category') === category) {
-                card.style.display = 'block';
-                visibleCount++;
-              } else {
-                card.style.display = 'none';
-              }
-            });
-            countElement.textContent = visibleCount;
-          });
-        });
-      });
-    </script>
-</body>
-</html> -->
-
-
-<!--SECONDO HTML OTTIMIZZATO-->
-<html lang="it">
-<head>
-    <title>{titoloPagina}</title>
-    </head>
-<body>
-    <main>
-        <h1>{titoloPagina}</h1>
-        <p>Elementi mostrati: <span id="count">{initialItems.length}</span></p>
-        
         <div class="grid" id="items-grid">
             {initialItems.map(item => (
-                <article class="card" data-category={item.category}>
-                    {item.image && <img src={item.image} alt={item.title} />}
-                    <div class="card-content">
-                        <h3>{item.title}</h3>
-                        {item.category && <span class="category">{item.category}</span>}
-                    </div>
+                <article class="card">
+                    {item.image && <img src={item.image} alt={item.title} loading="lazy" decoding="async" />}
+                    <div class="card-content"><h3>{item.title}</h3></div>
                 </article>
             ))}
         </div>
-
         <div id="sentinel"></div>
+        <div id="loading-indicator" style="text-align: center; padding: 2rem; display: none;">
+    <p>Caricamento altri elementi...</p>
     </main>
-
-    <script>
-  const grid = document.getElementById('items-grid');
-  const sentinel = document.getElementById('sentinel');
-  const countElement = document.getElementById('count');
-
-  let currentPage = 1; // Abbiamo già caricato la pagina 1
-  let isLoading = false; // Flag per evitare richieste multiple mentre ne è già in corso una
-  let allDataLoaded = false; // Flag per sapere quando non ci sono più pagine da caricare
-
-  const loadNextBatch = async () => {
-    // Non fare nulla se sta già caricando o se abbiamo finito i dati
-    if (isLoading || allDataLoaded) return; 
-    
-    isLoading = true;
-    currentPage++;
-
-    console.log(`Richiesta dati per pagina ${currentPage}...`);
-    
-    try {
-      // Chiamata al nostro nuovo endpoint API creato in /src/pages/api/items.js
-      const response = await fetch(`/api/items?page=${currentPage}`);
-      if (!response.ok) {
-        throw new Error(`Errore HTTP: ${response.status}`);
-      }
-      const batch = await response.json();
-
-      // Se la pagina restituita è vuota, significa che abbiamo caricato tutto
-      if (batch.length === 0) {
-        console.log('Tutti i dati sono stati caricati.');
-        allDataLoaded = true;
-        sentinel.style.display = 'none'; // Nasconde la sentinella per non triggerare più
-        return;
-      }
-
-      //               LOGICA DI CREAZIONE CARD
+    <script define:vars={{ initialOffset }}>
+      // Lo script client non necessita di modifiche, la sua logica è corretta.
+      const grid = document.getElementById('items-grid');
+      const sentinel = document.getElementById('sentinel');
+      const countElement = document.getElementById('count');
+      const filterButtons = document.querySelectorAll('.filter-btn');
       
-      batch.forEach(item => {
-        // 1. Crea l'elemento contenitore principale della card
+      let isLoading = false;
+      let allDataLoaded = false;
+      let activeCategory = 'all';
+      let nextOffset = initialOffset; 
+
+      if (!nextOffset) {
+        allDataLoaded = true;
+        sentinel.style.display = 'none';
+      }
+      
+
+      // che ogni card sia un figlio valido della griglia.
+      const createCard = (item) => {
+        // 1. Crea l'elemento contenitore principale <article>
         const card = document.createElement('article');
         card.className = 'card';
-        card.setAttribute('data-category', item.category);
 
-        // 2. Costruisce l'HTML interno della card come una stringa
-        let innerHTML = '';
+        // 2. Se l'item ha un'immagine, crea il tag <img> e configuralo
         if (item.image) {
-          innerHTML += `<img src="${item.image}" alt="${item.title}" loading="lazy" />`; // Aggiunto loading="lazy" per performance
-        }
-        
-        innerHTML += `<div class="card-content">`;
-        
-        if (item.title) {
-            innerHTML += `<h3>${item.title}</h3>`;
+          const img = document.createElement('img');
+          img.src = item.image;
+          img.alt = item.title || 'Immagine';
+          // Aggiungiamo attributi per l'ottimizzazione
+          img.loading = 'lazy'; // Carica l'immagine solo quando si avvicina
+          img.decoding = 'async'; // Dice al browser di non bloccare la pagina mentre decodifica l'immagine
+          card.appendChild(img); // Aggiunge l'immagine alla card
         }
 
-        if (item.category) {
-          innerHTML += `<span class="category">${item.category}</span>`;
+        // 3. Crea il contenitore per il testo
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'card-content';
+
+        // 4. Crea il titolo <h3>
+        const h3 = document.createElement('h3');
+        h3.textContent = item.title || ''; // Imposta il testo del titolo
+        contentDiv.appendChild(h3); // Aggiunge l'h3 al div del contenuto
+
+        // 5. Aggiunge il div del contenuto alla card
+        card.appendChild(contentDiv);
+
+        // 6. Restituisce l'elemento <article> completo e pronto
+        return card;
+      };
+
+      const loadItems = async (isNewFilter = false) => {
+        if (isLoading || (!isNewFilter && allDataLoaded)) return;
+        isLoading = true;
+        // NUOVO: Mostra l'indicatore di caricamento all'inizio della funzione.
+        document.getElementById('loading-indicator').style.display = 'block';
+
+        if (isNewFilter) {
+          nextOffset = null; 
+          allDataLoaded = false;
+          grid.innerHTML = '';
         }
         
-        innerHTML += `</div>`;
-        
-        // 3. Assegna l'HTML interno alla card
-        card.innerHTML = innerHTML;
-        
-        // 4. Aggiunge la card completa alla griglia
-        grid.appendChild(card);
+        let apiUrl = `/api/items?category=${encodeURIComponent(activeCategory)}`;
+        if (nextOffset) {
+          apiUrl += `&offset=${nextOffset}`;
+        }
+
+        try {
+            const response = await fetch(apiUrl);
+            if (!response.ok) {
+                throw new Error(`Errore API: ${response.status}`);
+            }
+            const data = await response.json();
+            const items = data.items;
+
+            if (!data.offset) {
+              allDataLoaded = true;
+              sentinel.style.display = 'none';
+            } else {
+              sentinel.style.display = 'block';
+              nextOffset = data.offset;
+            }
+
+            items.forEach(item => grid.appendChild(createCard(item)));
+            countElement.textContent = grid.children.length;
+
+        } catch (error) {
+            console.error("Errore durante il caricamento degli items:", error);
+            // Potremmo mostrare un messaggio di errore all'utente qui
+        } finally {
+            // NUOVO: Questo blocco 'finally' viene eseguito sempre,
+            // sia che il caricamento abbia successo sia che fallisca.
+            // È il posto perfetto per nascondere l'indicatore e sbloccare.
+            isLoading = false;
+            document.getElementById('loading-indicator').style.display = 'none';
+        }
+      };
+
+      const observer = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting && !isLoading) {
+          loadItems();
+        }
       });
-      
-      // Aggiorna il contatore degli elementi visualizzati
-      countElement.textContent = grid.children.length;
+      observer.observe(sentinel);
 
-    } catch (error) {
-      console.error('Errore nel caricare la pagina successiva:', error);
-      // Potremmo mostrare un messaggio di errore all'utente qui
-    } finally {
-      isLoading = false; // Resetta il flag per permettere la prossima richiesta
-    }
-  };
-
-  // L'Intersection Observer che monitora la sentinella
-  const observer = new IntersectionObserver((entries) => {
-    // Se la sentinella entra nell'area visibile...
-    if (entries[0].isIntersecting) {
-      // ...carica il blocco di dati successivo
-      loadNextBatch();
-    }
-  }, {
-    // Opzioni: triggera quando la sentinella è a 300px dal bordo inferiore dello schermo
-    rootMargin: '0px 0px 300px 0px'
-  });
-
-  // Inizia a osservare la sentinella
-  observer.observe(sentinel);
-</script>
+      filterButtons.forEach(button => {
+        button.addEventListener('click', () => {
+          const newCategory = button.getAttribute('data-category');
+          if (newCategory === activeCategory) return;
+          
+          activeCategory = newCategory;
+          filterButtons.forEach(btn => btn.classList.remove('active'));
+          button.classList.add('active');
+          
+          loadItems(true);
+        });
+      });
+    </script>
 </body>
 </html>

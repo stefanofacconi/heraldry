@@ -1,74 +1,83 @@
-// src/pages/api/items.js
-import Airtable from 'airtable';
+// ==========================================================
+// ## FILE: src/pages/api/items.js (VERSIONE FINALE con FETCH)
+// ## RUOLO: API che usa una chiamata diretta e affidabile ad Airtable.
+// ==========================================================
 
-// La configurazione di Airtable è la stessa, ma vive in questo file
-const base = new Airtable({
-  apiKey: import.meta.env.PUBLIC_AIRTABLE_API_KEY,
-}).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
+// NOTA: Non importiamo più 'Airtable', non ci serve più.
 
+// Le costanti per le credenziali rimangono le stesse.
 const TABLE_NAME = import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME;
-const VIEW_NAME = 'links 2'; // Usiamo una vista stabile
-const PAGE_SIZE = 100; // Quanti record per pagina
+const BASE_ID = import.meta.env.PUBLIC_AIRTABLE_BASE_ID;
+const API_KEY = import.meta.env.PUBLIC_AIRTABLE_API_KEY;
+const VIEW_NAME = 'links 2';
+const PAGE_SIZE = 100;
 
-// Questa è la funzione che viene eseguita quando qualcuno visita /api/items
+// La funzione API, ora riscritta con fetch.
 export async function GET({ request }) {
   try {
-    const url = new URL(request.url);
-    const page = parseInt(url.searchParams.get('page') || '1');
+    const requestUrl = new URL(request.url);
+    const category = requestUrl.searchParams.get('category');
+    const offset = requestUrl.searchParams.get('offset');
+
+    // NUOVO: Costruiamo l'URL dell'API Airtable e i suoi parametri.
+    // Iniziamo con l'URL di base per la nostra tabella.
+    let apiUrl = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(TABLE_NAME)}`;
     
-    // Funzione helper per recuperare una pagina specifica
-    const getPage = (pageNumber) => {
-      return new Promise((resolve, reject) => {
-        let currentPage = 0;
-        const recordsBuffer = [];
-        
-        base(TABLE_NAME).select({
-          view: VIEW_NAME,
-          pageSize: PAGE_SIZE, // Chiedi a Airtable di darci pagine da 100
-        }).eachPage(
-          function page(records, fetchNextPage) {
-            currentPage++;
-            if (currentPage === pageNumber) {
-              records.forEach(record => recordsBuffer.push(record));
-              // Abbiamo trovato la pagina che volevamo, fermiamo l'iterazione
-              resolve(recordsBuffer);
-              return;
-            }
-            // Non è la pagina che vogliamo, chiedi la successiva
-            fetchNextPage();
-          },
-          function done(err) {
-            if (err) {
-              reject(err);
-              return;
-            }
-            // Se arriviamo qui, significa che abbiamo finito le pagine
-            // senza trovare quella richiesta (o era l'ultima)
-            resolve(recordsBuffer); 
-          }
-        );
-      });
+    // Usiamo URLSearchParams per aggiungere i parametri in modo pulito e sicuro.
+    const params = new URLSearchParams({
+        pageSize: PAGE_SIZE,
+        view: VIEW_NAME
+    });
+
+    // Se il client ha richiesto una categoria specifica, aggiungiamo il filtro.
+    if (category && category !== 'all') {
+        params.append('filterByFormula', `{Categoria} = '${category}'`);
+    }
+
+    // Se il client ci ha fornito un offset (per le pagine successive alla prima), lo aggiungiamo.
+    if (offset) {
+        params.append('offset', offset);
+    }
+    
+    // Uniamo l'URL di base con i parametri per ottenere l'URL finale.
+    apiUrl = `${apiUrl}?${params.toString()}`;
+
+    // NUOVO: Prepariamo gli header per l'autenticazione, come abbiamo fatto in index.astro.
+    const headers = {
+        'Authorization': `Bearer ${API_KEY}`,
     };
 
-    const records = await getPage(page);
+    // NUOVO: Eseguiamo la chiamata diretta con fetch.
+    const response = await fetch(apiUrl, { headers: headers });
 
-    // Mappa i dati nel formato che ci serve, proprio come prima
-    const items = records.map(record => ({
+    if (!response.ok) {
+        // Se la risposta non è positiva, lanciamo un errore dettagliato.
+        throw new Error(`Errore API: ${response.status} - ${response.statusText}`);
+    }
+
+    // Convertiamo la risposta in un oggetto JavaScript.
+    const data = await response.json();
+
+    // Mappiamo i dati nel formato atteso dal nostro frontend.
+    const items = data.records.map(record => ({
       id: record.id,
       title: record.fields['NomeImmagine'],
       image: record.fields.immagine?.[0]?.url,
       category: record.fields.Categoria,
     }));
 
-    // Restituisce i dati come JSON
-    return new Response(JSON.stringify(items), {
+    // Restituiamo l'oggetto completo, contenente sia gli items che il nuovo offset.
+    return new Response(JSON.stringify({
+      items: items,
+      offset: data.offset,
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
-
+    
   } catch (error) {
-    console.error(error);
-    return new Response(JSON.stringify({ message: 'Errore del server' }), {
+    console.error("!!! ERRORE NELL'ENDPOINT API (FETCH):", error.message);
+    return new Response(JSON.stringify({ message: 'Errore interno del server' }), {
       status: 500,
     });
   }
