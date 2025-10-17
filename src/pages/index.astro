@@ -4,101 +4,38 @@ import Airtable from 'airtable';
 
 const base = new Airtable({ apiKey: import.meta.env.PUBLIC_AIRTABLE_API_KEY }).base(import.meta.env.PUBLIC_AIRTABLE_BASE_ID);
 
-let initialItems = [];
-let initialOffset = null;
+type Item = { id: string; title?: string; image?: string; category?: string };
+
+let initialItems: Item[] = [];
+let initialOffset: string | null = null;
 const titoloPagina = "Il mio archivio";
 
-try {
-  // NUOVO: Costruiamo manualmente l'URL per l'API di Airtable.
-  // Usiamo 'encodeURIComponent' per assicurarci che caratteri speciali
-  // nel nome della tabella o della vista non creino problemi.
+// Caricamento iniziale: uso top-level await con then/catch per garantire che SSR attenda il risultato
+{
   const tableName = encodeURIComponent(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME);
   const baseId = import.meta.env.PUBLIC_AIRTABLE_BASE_ID;
   const viewName = encodeURIComponent('links 2');
-
-  // Questo è l'indirizzo esatto che interrogheremo.
-  // Stiamo chiedendo 100 record dalla vista specificata.
   const url = `https://api.airtable.com/v0/${baseId}/${tableName}?pageSize=100&view=${viewName}`;
+  const headers = { 'Authorization': `Bearer ${import.meta.env.PUBLIC_AIRTABLE_API_KEY}` };
 
-  // NUOVO: Prepariamo gli "header" della richiesta.
-  // Questo è il modo standard per autenticarsi con un'API.
-  // Stiamo dicendo ad Airtable: "Sono io, ecco la mia chiave segreta".
-  const headers = {
-    'Authorization': `Bearer ${import.meta.env.PUBLIC_AIRTABLE_API_KEY}`,
-  };
-
-  // NUOVO: Eseguiamo la chiamata di rete usando 'fetch'.
-  // Questo è il comando base di JavaScript per fare richieste HTTP,
-  // senza nessuna libreria in mezzo.
-  const response = await fetch(url, { headers: headers });
-
-  // NUOVO: Controlliamo se la risposta è andata a buon fine.
-  // Se lo status non è "ok" (es. 401 non autorizzato, 404 non trovato),
-  // lanciamo un errore per capire cosa è andato storto.
-  if (!response.ok) {
-    throw new Error(`Errore dalla API di Airtable: ${response.status} ${response.statusText}`);
-  }
-
-  // NUOVO: Convertiamo la risposta, che è in formato testo (JSON),
-  // in un oggetto JavaScript che possiamo usare.
-  const data = await response.json();
-
-  // NUOVO: Il nostro log di diagnosi, adattato alla nuova struttura della risposta.
-  // La risposta diretta da Airtable contiene i record in `data.records`
-  // e l'offset direttamente in `data.offset`.
-  console.log("SERVER LOG (FETCH) | Offset ricevuto:", data.offset ? `Sì! (Inizia con ${data.offset.substring(0, 8)}...)` : "NO, ancora nullo!");
-
-  // Adattiamo la mappatura per leggere da 'data.records'.
-  initialItems = data.records.map(record => ({
-    id: record.id,
-    title: record.fields['NomeImmagine'],
-    image: record.fields.immagine?.[0]?.url,
-    category: record.fields.Categoria
-  }));
-  
-  // Salviamo l'offset dalla nuova struttura dati.
-  initialOffset = data.offset;
-
-} catch (error) {
-  console.error('ERRORE CRITICO DURANTE IL CARICAMENTO INIZIALE (FETCH):', error.message);
-}
-
-/*try {
-  // Selezioniamo i dati da Airtable per il caricamento iniziale.
-  const firstPage = await base(import.meta.env.PUBLIC_AIRTABLE_TABLE_NAME)
-    .select({
-      // MODIFICA CHIAVE: Abbiamo rimosso la riga "maxRecords: 100".
-      // Lasciamo solo pageSize per dire ad Airtable: "Dammi i record in blocchi
-      // da 100, a partire dal primo". In questo modo, Airtable sa che ci sono
-      // altre pagine e ci restituirà l'offset per raggiungerle.
-      pageSize: 100,
-      view: 'links 2',
-      fields: ['NomeImmagine', 'immagine', 'Categoria']
+  await fetch(url, { headers })
+    .then(response => {
+      if (!response.ok) throw new Error(`Errore dalla API di Airtable: ${response.status} ${response.statusText}`);
+      return response.json();
     })
-    .firstPage();
-  
-  // NUOVO: Aggiungiamo un "console.log" diagnostico.
-  // Questo non è necessario per il funzionamento, ma è uno strumento per noi.
-  // Ci permette di verificare direttamente nel terminale se il server sta
-  // ricevendo correttamente l'offset da Airtable. È una buona pratica
-  // per capire cosa succede "dietro le quinte".
-  console.log("SERVER LOG | Offset ricevuto per la pagina successiva:", firstPage.offset ? `Sì, ricevuto (inizia con ${firstPage.offset.substring(0, 8)}...)` : "NO, non ricevuto!");
-
-  // Questa parte mappa i dati nel formato che usiamo nel sito, è invariata.
-  initialItems = firstPage.map(record => ({
-    id: record.id,
-    title: record.fields['NomeImmagine'],
-    image: record.fields.immagine?.[0]?.url,
-    category: record.fields.Categoria
-  }));
-  
-  // Questa riga salva l'offset per passarlo allo script del browser, è invariata.
-  initialOffset = firstPage.offset;
-
-} catch (error) {
-  // Blocco per la gestione degli errori, invariato.
-  console.error('ERRORE CRITICO DURANTE IL CARICAMENTO INIZIALE:', error.message);
-}*/
+    .then((data: any) => {
+      initialItems = (data.records || []).map((record: any) => ({
+        id: record.id,
+        title: record.fields?.['NomeImmagine'],
+        image: record.fields?.immagine?.[0]?.url,
+        category: record.fields?.Categoria
+      }));
+      initialOffset = data.offset ?? null;
+    })
+    .catch((err: any) => {
+      console.error('ERRORE CRITICO DURANTE IL CARICAMENTO INIZIALE (FETCH):', err instanceof Error ? err.message : String(err));
+    });
+}
 ---
 
 <html lang="it">
@@ -107,22 +44,152 @@ try {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
     <style>
-        body { font-family: sans-serif; max-width: 1400px; margin: 2rem auto; padding: 0 1rem; background-color: #f8f9fa; }
-        .controls { margin-bottom: 2rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
-        .filters button { padding: 0.6rem 1.2rem; border: 1px solid #dee2e6; background-color: #ffffff; cursor: pointer; border-radius: 8px; }
-        .filters button:hover { background-color: #e9ecef; }
-        .filters button.active { background-color: #007bff; color: white; border-color: #007bff; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.5rem; }
-        .card { background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; }
-        .card img { width: 100%; height: 150px; object-fit: cover; display: block; background-color: #eee; }
-        .card-content { padding: 1rem; }
-        .card-content h3 { margin: 0; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        #sentinel { height: 50px; }
-      
+      :root {
+        --max-width: 1400px;
+        --gap: 1.25rem;
+        --card-radius: 8px;
+        --card-shadow: 0 2px 6px rgba(0,0,0,0.06);
+        --thumb-aspect: 4/3;
+        --title-font-size: 0.95rem;
+        --title-height: 56px; /* altezza fissa area titolo */
+        --bg-page: #ffffff;
+        --card-bg: #ffffff;
+        --title-bg: #fff;
+      }
+
+      .gallery-root {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+        max-width: var(--max-width);
+        margin: 2rem auto;
+        padding: 0 1rem;
+        background-color: var(--bg-page);
+        box-sizing: border-box;
+      }
+
+      .gallery-root .controls { margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+      .gallery-root .filters button { padding: 0.6rem 1.2rem; border: 1px solid #dee2e6; background-color: var(--card-bg); cursor: pointer; border-radius: 8px; }
+      .gallery-root .filters button:hover { background-color: #e9ecef; }
+      .gallery-root .filters button.active { background-color: #007bff; color: white; border-color: #007bff; }
+
+      /* grid layout */
+      .gallery-root .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: var(--gap);
+        align-items: start;
+        box-sizing: border-box;
+      }
+
+      /* card */
+      .gallery-root .card {
+        display: flex;
+        flex-direction: column;
+        background-color: var(--card-bg);
+        border-radius: var(--card-radius);
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+        min-height: calc((100px) + var(--title-height)); /* evita collapsing */
+      }
+
+      /* thumb: riserva lo spazio e mantiene proporzioni */
+      .gallery-root .thumb {
+        width: 100%;
+        aspect-ratio: var(--thumb-aspect);
+        background-color: #f6f7f8;
+        display: block;
+        position: relative;
+        overflow: hidden;
+      }
+      /* immagine riempie l'area e viene ritagliata in modo consistente */
+      .gallery-root .thumb img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;       /* COVER per omogeneità visiva */
+        display: block;
+      }
+
+      /* area titolo: barra bianca fissa in fondo alla card */
+      .gallery-root .card-content {
+        padding: 0.5rem 0.75rem;
+        background: var(--title-bg);
+        border-top: 1px solid rgba(0,0,0,0.04);
+        display: flex;
+        align-items: center;
+        height: var(--title-height);
+        box-sizing: border-box;
+      }
+      .gallery-root .card-content h3 {
+        margin: 0;
+        font-size: var(--title-font-size);
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* small helpers */
+      #sentinel { height: 50px; }
+      @media (min-width: 900px) {
+        .gallery-root .grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+        :root { --title-height: 64px; --title-font-size: 1rem; }
+      }
     </style>
+    <!-- Normalizza il DOM SSR: wrappa eventuali <img> lasciati fuori dalla struttura .thumb -->
+    <script>
+      (function normalizeSSR() {
+        try {
+          const cards = document.querySelectorAll('.grid .card');
+          if (!cards.length) return;
+          cards.forEach(card => {
+            if (!card.classList.contains('card')) card.classList.add('card');
+
+            let img = null;
+            try { img = card.querySelector(':scope > img'); } catch(e) { img = null; }
+            if (!img) {
+              const found = Array.from(card.querySelectorAll('img')).find(i => !i.closest('.thumb'));
+              img = found ?? null;
+            }
+
+            if (img && !img.closest('.thumb')) {
+              const thumb = document.createElement('div');
+              thumb.className = 'thumb';
+              // fallback inline per .thumb quando il CSS non è ancora attivo
+              thumb.style.position = 'relative';
+              thumb.style.paddingTop = '75%';
+              thumb.style.width = '100%';
+              thumb.style.overflow = 'hidden';
+              // mantiene gli angoli arrotondati in testa alla card
+              thumb.style.borderTopLeftRadius = '8px';
+              thumb.style.borderTopRightRadius = '8px';
+
+              card.insertBefore(thumb, card.firstChild);
+              thumb.appendChild(img);
+
+              // se l'immagine è posizionata assoluta, applica fallback per riempire il contenitore
+              img.style.position = img.style.position || 'absolute';
+              img.style.top = img.style.top || '0';
+              img.style.left = img.style.left || '0';
+              img.style.width = img.style.width || '100%';
+              img.style.height = img.style.height || '100%';
+              img.style.objectFit = img.style.objectFit || 'cover';
+            }
+
+            // assicurati che la card abbia fallback di stile (in caso il CSS non sia applicato)
+            card.style.borderRadius = card.style.borderRadius || '8px';
+            card.style.boxShadow = card.style.boxShadow || '0 2px 6px rgba(0,0,0,0.06)';
+            card.style.overflow = card.style.overflow || 'hidden';
+            card.style.background = card.style.background || '#fff';
+          });
+        } catch (e) {
+          console.warn('normalizeSSR failed', e);
+        }
+      })();
+    </script>
 </head>
 <body>
-    <main>
+    <main class="gallery-root">
         <h1>{titoloPagina}</h1>
         <p>Elementi mostrati: <span id="count">{initialItems.length}</span></p>
         <div class="controls">
@@ -138,14 +205,19 @@ try {
         <div class="grid" id="items-grid">
             {initialItems.map(item => (
                 <article class="card">
-                    {item.image && <img src={item.image} alt={item.title} loading="lazy" decoding="async" />}
+                    {item.image && (
+                      <div class="thumb">
+                        <img src={item.image} alt={item.title} loading="lazy" decoding="async" />
+                      </div>
+                    )}
                     <div class="card-content"><h3>{item.title}</h3></div>
                 </article>
             ))}
         </div>
         <div id="sentinel"></div>
         <div id="loading-indicator" style="text-align: center; padding: 2rem; display: none;">
-    <p>Caricamento altri elementi...</p>
+          <p>Caricamento altri elementi...</p>
+        </div>
     </main>
     <script define:vars={{ initialOffset }}>
       // Lo script client non necessita di modifiche, la sua logica è corretta.
@@ -167,41 +239,79 @@ try {
 
       // che ogni card sia un figlio valido della griglia.
       const createCard = (item) => {
-        // 1. Crea l'elemento contenitore principale <article>
         const card = document.createElement('article');
-        card.className = 'card';
+        card.classList.add('card');
 
-        // 2. Se l'item ha un'immagine, crea il tag <img> e configuralo
+        // INLINE FALLBACK STYLES: garantiscono sempre angoli/ombra/overflow
+        card.style.borderRadius = '8px';
+        card.style.boxShadow = '0 2px 6px rgba(0,0,0,0.06)';
+        card.style.overflow = 'hidden';
+        card.style.background = '#fff';
+        card.style.display = 'flex';
+        card.style.flexDirection = 'column';
+
         if (item.image) {
+          const thumb = document.createElement('div');
+          thumb.classList.add('thumb');
+
+          // fallback inline per mantenere il rapporto 4/3 se il CSS non è ancora applicato
+          thumb.style.position = 'relative';
+          thumb.style.paddingTop = '75%'; // 4/3 => 75%
+          thumb.style.width = '100%';
+          thumb.style.overflow = 'hidden';
+          // arrotonda solo gli angoli superiori per evitare che l'immagine "scavalchi" il bordo
+          thumb.style.borderTopLeftRadius = '8px';
+          thumb.style.borderTopRightRadius = '8px';
+
           const img = document.createElement('img');
           img.src = item.image;
           img.alt = item.title || 'Immagine';
-          // Aggiungiamo attributi per l'ottimizzazione
-          img.loading = 'lazy'; // Carica l'immagine solo quando si avvicina
-          img.decoding = 'async'; // Dice al browser di non bloccare la pagina mentre decodifica l'immagine
-          card.appendChild(img); // Aggiunge l'immagine alla card
+          img.loading = 'lazy';
+          img.decoding = 'async';
+
+          // posiziona l'immagine per riempire il contenitore
+          img.style.position = 'absolute';
+          img.style.top = '0';
+          img.style.left = '0';
+          img.style.right = '0';
+          img.style.bottom = '0';
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.objectFit = 'cover';
+          img.style.display = 'block';
+
+          thumb.appendChild(img);
+          card.appendChild(thumb);
         }
 
-        // 3. Crea il contenitore per il testo
         const contentDiv = document.createElement('div');
-        contentDiv.className = 'card-content';
+        contentDiv.classList.add('card-content');
+        // fallback per area titolo (coerente con CSS)
+        contentDiv.style.padding = '0.5rem 0.75rem';
+        contentDiv.style.background = '#fff';
+        contentDiv.style.borderTop = '1px solid rgba(0,0,0,0.04)';
+        contentDiv.style.display = 'flex';
+        contentDiv.style.alignItems = 'center';
+        contentDiv.style.boxSizing = 'border-box';
+        contentDiv.style.height = '56px';
 
-        // 4. Crea il titolo <h3>
         const h3 = document.createElement('h3');
-        h3.textContent = item.title || ''; // Imposta il testo del titolo
-        contentDiv.appendChild(h3); // Aggiunge l'h3 al div del contenuto
+        h3.textContent = item.title || '';
+        h3.style.margin = '0';
+        h3.style.fontSize = '0.95rem';
+        h3.style.fontWeight = '700';
+        h3.style.whiteSpace = 'nowrap';
+        h3.style.overflow = 'hidden';
+        h3.style.textOverflow = 'ellipsis';
 
-        // 5. Aggiunge il div del contenuto alla card
+        contentDiv.appendChild(h3);
         card.appendChild(contentDiv);
-
-        // 6. Restituisce l'elemento <article> completo e pronto
         return card;
       };
 
       const loadItems = async (isNewFilter = false) => {
         if (isLoading || (!isNewFilter && allDataLoaded)) return;
         isLoading = true;
-        // NUOVO: Mostra l'indicatore di caricamento all'inizio della funzione.
         document.getElementById('loading-indicator').style.display = 'block';
 
         if (isNewFilter) {
@@ -231,7 +341,10 @@ try {
               nextOffset = data.offset;
             }
 
-            items.forEach(item => grid.appendChild(createCard(item)));
+            // meno reflow: append in batch usando DocumentFragment
+            const frag = document.createDocumentFragment();
+            items.forEach(item => frag.appendChild(createCard(item)));
+            grid.appendChild(frag);
             countElement.textContent = grid.children.length;
 
         } catch (error) {
@@ -266,5 +379,5 @@ try {
         });
       });
     </script>
-</body>
-</html>
+  </body>
+  </html>
